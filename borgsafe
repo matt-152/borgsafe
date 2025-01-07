@@ -1,37 +1,59 @@
 #!/usr/bin/env bash
 
-BORGSAFE_PREFIX=${BORGSAFE_PREFIX:-"borgsafe_"}
-# Exported so borg can use them (man borg > Environment Variables)
-export BORG_REPO=${BORG_REPO:-"$HOME/macbookSafe"}
+# Exported so borg can use it (man borg > Environment Variables)
 export BORG_PASSPHRASE
 
 WORKING_AREA="$(mktemp -d)"
 
-dbHash=""
+cmd=""
+borgArchive=""
+archiveName=""
+borgPath=""
 
 main() {
-  cmd="$*"
-
+  processArgs "$@"
+  assertBorgInstalled
   assertRepoValid
+  assertArchiveValid
+
   getBorgPassword
   enterWorkingArea
+  ensureArchiveExists
   extractDB
-  noteDbHash
 
   $SHELL -c "$cmd"
-
-  if dbHashChanged; then
-    createNewArchive
+  rc=$?
+  
+  if [ $rc -eq 0 ]
+  then saveChanges
+  else reportCmdFailure
   fi
+
   clearWorkingArea
 }
 
-assertRepoValid() {
-  if [ ! -d "$BORG_REPO" ]; then
-    echo "Borg repo not found: $BORG_REPO"
+processArgs() {
+  borgPath="$(realpath "${1%::*}")"
+  archiveName="${1#*::}"
+  borgArchive="${borgPath}::${archiveName}"
+  shift 1
+  [ "$1" = "--" ] && shift 1
+  cmd="$*"
+}
+
+assertBorgInstalled() {
+  if ! borg --version >/dev/null 2>/dev/null; then
+    echo "Borg not installed, or not in PATH"
     exit 1
-  elif ! grep --silent "Borg Backup" "$BORG_REPO/README"; then
-    echo "Directory is not a borg repository: $BORG_REPO"
+  fi
+}
+
+assertRepoValid() {
+  if [ ! -d "$borgPath" ]; then
+    echo "Borg repo doesn't exist: $borgPath"
+    exit 1
+  elif ! grep --silent 'Borg Backup' "$borgPath/README"; then
+    echo "Not a valid borg repo: $borgPath"
     exit 1
   fi
 }
@@ -49,7 +71,23 @@ promptForPassword() {
 }
 passphraseCorrect() {
   test "$BORG_PASSPHRASE" != "" && \
-  borg info >/dev/null 2>&1
+  borg info "$borgPath" >/dev/null 2>&1
+}
+
+assertArchiveValid() {
+  if ! (echo "$borgArchive" | grep --silent '::'); then
+    echo "Repo must include an archive (::)"
+    exit 1
+  fi
+}
+
+ensureArchiveExists() {
+  if ! archiveExists; then
+    borg create "$borgArchive" .
+  fi
+}
+archiveExists() {
+  borg list "$borgPath" | grep --silent "$archiveName"
 }
 
 enterWorkingArea() {
@@ -60,40 +98,18 @@ enterWorkingArea() {
 }
 
 extractDB() {
-  latestArchive="$(getLatestArchive)"
-  if [ "$latestArchive" = "" ]; then
-    createNewArchive
-    latestArchive="$(getLatestArchive)"
-  fi
-  borg extract "$latestArchive"
-}
-getLatestArchive() {
-  borg list | \
-    grep "$BORGSAFE_PREFIX" | \
-    cut -d' ' -f1 | \
-    sort | \
-    tail -n1 | \
-    xargs printf "::%s"
+  borg extract "$borgArchive"
 }
 
-noteDbHash() {
-  dbHash=$(curDirHash)
-}
-dbHashChanged() {
-  test "$dbHash" != "$(curDirHash)"
-}
-curDirHash() {
-  find . -print -type f -exec cat {} \; | md5
+saveChanges() {
+  borg delete "$borgArchive"
+  borg create "$borgArchive" .
+  borg compact "$borgPath"
 }
 
-createNewArchive() {
-  archiveName=$(generateArchiveName)
-  borg create "$archiveName" .
-  borg compact
-}
-generateArchiveName() {
-  timestamp=$(date +%FT%T)
-  echo "::${BORGSAFE_PREFIX}${timestamp}"
+reportCmdFailure() {
+  echo "Command exited with non-zero status: $cmd"
+  echo "Changes not saved"
 }
 
 clearWorkingArea() {
