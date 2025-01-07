@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-BORGSAFE_PREFIX="borgsafe_"
+BORGSAFE_PREFIX=${BORGSAFE_PREFIX:-"borgsafe_"}
 # Exported so borg can use them (man borg > Environment Variables)
-export BORG_REPO="$HOME/macbookSafe"
+export BORG_REPO=${BORG_REPO:-"$HOME/macbookSafe"}
 export BORG_PASSPHRASE
 
 WORKING_AREA="$(mktemp -d)"
