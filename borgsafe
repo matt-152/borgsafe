@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+
+BORGSAFE_PREFIX="borgsafe_"
+# Exported so borg can use them (man borg > Environment Variables)
+export BORG_REPO="$HOME/macbookSafe"
+export BORG_PASSPHRASE
+
+WORKING_AREA="$(mktemp -d)"
+
+dbHash=""
+
+main() {
+  cmd="$*"
+
+  assertRepoValid
+  getBorgPassword
+  enterWorkingArea
+  extractDB
+  noteDbHash
+
+  $SHELL -c "$cmd"
+
+  if dbHashChanged; then
+    createNewArchive
+  fi
+  clearWorkingArea
+}
+
+assertRepoValid() {
+  if [ ! -d "$BORG_REPO" ]; then
+    echo "Borg repo not found: $BORG_REPO"
+    exit 1
+  elif ! grep --silent "Borg Backup" "$BORG_REPO/README"; then
+    echo "Directory is not a borg repository: $BORG_REPO"
+    exit 1
+  fi
+}
+
+getBorgPassword() {
+  if ! passphraseCorrect; then
+    promptForPassword
+  fi
+}
+promptForPassword() {
+  while ! passphraseCorrect; do
+    read -srp "Enter borg passphrase: " BORG_PASSPHRASE
+    echo ""
+  done
+}
+passphraseCorrect() {
+  test "$BORG_PASSPHRASE" != "" && \
+  borg info >/dev/null 2>&1
+}
+
+enterWorkingArea() {
+  rm -rf  "$WORKING_AREA"
+  mkdir "$WORKING_AREA"
+  chmod 700 "$WORKING_AREA"
+  cd "$WORKING_AREA" || exit 1
+}
+
+extractDB() {
+  latestArchive="$(getLatestArchive)"
+  if [ "$latestArchive" = "" ]; then
+    createNewArchive
+    latestArchive="$(getLatestArchive)"
+  fi
+  borg extract "$latestArchive"
+}
+getLatestArchive() {
+  borg list | \
+    grep "$BORGSAFE_PREFIX" | \
+    cut -d' ' -f1 | \
+    sort | \
+    tail -n1 | \
+    xargs printf "::%s"
+}
+
+noteDbHash() {
+  dbHash=$(curDirHash)
+}
+dbHashChanged() {
+  test "$dbHash" != "$(curDirHash)"
+}
+curDirHash() {
+  find . -print -type f -exec cat {} \; | md5
+}
+
+createNewArchive() {
+  archiveName=$(generateArchiveName)
+  borg create "$archiveName" .
+  borg compact
+}
+generateArchiveName() {
+  timestamp=$(date +%FT%T)
+  echo "::${BORGSAFE_PREFIX}${timestamp}"
+}
+
+clearWorkingArea() {
+  cd /
+  rm -rf "$WORKING_AREA"
+}
+
+main "$@"
