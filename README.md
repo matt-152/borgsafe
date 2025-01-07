@@ -5,4 +5,4 @@ The script extracts a borg archive into a temporary directory. It treats all of 
 
 The script will version any changes to the content, but deliberately ignores metadata. This behavior can be changed by editing the "curDirHash" function.
 
-The target borg repo is set in a variable at the top of the script. The script produces timestamped archives; the prefix used is also set as a variable at the top of the script.
+The target borg repo is set in a variable at the top of the script. The script produces timestamped archives; the prefix used is also set as a variable at the top of the script. These top-level parameters may also be set as environment variables externally.
